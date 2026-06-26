@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ShadowWalk — Find the shadiest route</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #eee; height: 100vh; display: flex; flex-direction: column; }
+
+  #header {
+    background: #16213e;
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    border-bottom: 1px solid #0f3460;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+
+  #header h1 {
+    font-size: 18px;
+    font-weight: 700;
+    color: #f5a623;
+    white-space: nowrap;
+  }
+
+  #header h1 span { color: #4ecdc4; }
+
+  .ctrl-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .pin-btn {
+    padding: 7px 14px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    transition: all 0.15s;
+  }
+
+  #btn-start { background: #2ecc71; color: #fff; }
+  #btn-start.active { background: #27ae60; box-shadow: 0 0 0 3px rgba(46,204,113,0.4); }
+  #btn-end   { background: #e74c3c; color: #fff; }
+  #btn-end.active   { background: #c0392b; box-shadow: 0 0 0 3px rgba(231,76,60,0.4); }
+
+  #btn-route {
+    padding: 7px 18px;
+    background: #f5a623;
+    color: #1a1a2e;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 700;
+    transition: background 0.15s;
+  }
+  #btn-route:hover { background: #e8942a; }
+  #btn-route:disabled { background: #555; color: #888; cursor: not-allowed; }
+
+  .time-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+  }
+  .time-group label { font-size: 12px; color: #aaa; }
+  #time-input {
+    background: #0f3460;
+    border: 1px solid #2a5298;
+    border-radius: 5px;
+    color: #eee;
+    padding: 5px 8px;
+    font-size: 13px;
+  }
+
+  #sun-info {
+    font-size: 12px;
+    color: #f5a623;
+    white-space: nowrap;
+  }
+
+  #map-container { flex: 1; position: relative; }
+  #map { width: 100%; height: 100%; }
+
+  #sidebar {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 260px;
+    background: rgba(22, 33, 62, 0.95);
+    border: 1px solid #0f3460;
+    border-radius: 10px;
+    padding: 14px;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: calc(100% - 20px);
+    overflow-y: auto;
+  }
+
+  #sidebar h3 { font-size: 13px; color: #4ecdc4; text-transform: uppercase; letter-spacing: 0.05em; }
+
+  .route-card {
+    background: #0f3460;
+    border-radius: 8px;
+    padding: 10px 12px;
+    border: 2px solid transparent;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .route-card:hover { border-color: #4ecdc4; }
+  .route-card.best { border-color: #4ecdc4; background: #123d60; }
+
+  .route-card .route-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: #eee;
+    margin-bottom: 6px;
+  }
+  .route-card.best .route-label::after { content: ' ✦ Best'; color: #4ecdc4; }
+
+  .shade-bar-bg {
+    background: #2a2a4a;
+    border-radius: 4px;
+    height: 10px;
+    overflow: hidden;
+    margin-bottom: 4px;
+  }
+  .shade-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    background: linear-gradient(90deg, #2ecc71, #4ecdc4);
+    transition: width 0.4s ease;
+  }
+
+  .route-meta { font-size: 11px; color: #aaa; display: flex; justify-content: space-between; }
+
+  #status {
+    position: absolute;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(22,33,62,0.92);
+    border: 1px solid #0f3460;
+    border-radius: 20px;
+    padding: 8px 18px;
+    font-size: 13px;
+    color: #eee;
+    z-index: 1000;
+    pointer-events: none;
+    transition: opacity 0.3s;
+    white-space: nowrap;
+  }
+  #status.hidden { opacity: 0; }
+
+  #loading-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(26,26,46,0.7);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    display: none;
+  }
+  #loading-overlay .spinner {
+    width: 48px; height: 48px;
+    border: 4px solid #0f3460;
+    border-top-color: #f5a623;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  #loading-overlay p { margin-top: 14px; color: #f5a623; font-size: 14px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .legend {
+    display: flex;
+    gap: 12px;
+    font-size: 11px;
+    color: #aaa;
+    flex-wrap: wrap;
+  }
+  .legend-item { display: flex; align-items: center; gap: 5px; }
+  .legend-dot { width: 12px; height: 4px; border-radius: 2px; }
+
+  #instructions {
+    font-size: 12px;
+    color: #aaa;
+    line-height: 1.6;
+  }
+  #instructions b { color: #eee; }
+
+  .sun-dial {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .sun-dial canvas { display: block; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>☀️ Shadow<span>Walk</span></h1>
+
+  <div class="ctrl-group">
+    <button class="pin-btn" id="btn-start">📍 Set Start</button>
+    <button class="pin-btn" id="btn-end">🏁 Set End</button>
+    <button id="btn-route" disabled>Find Shadiest Route</button>
+  </div>
+
+  <div class="time-group">
+    <label>Time:</label>
+    <input type="time" id="time-input"/>
+    <span id="sun-info">—</span>
+  </div>
+</div>
+
+<div id="map-container">
+  <div id="map"></div>
+
+  <div id="sidebar">
+    <h3>Routes</h3>
+    <div id="instructions">
+      <b>1.</b> Click "Set Start", then click on the map.<br>
+      <b>2.</b> Click "Set End", then click destination.<br>
+      <b>3.</b> Adjust time if needed.<br>
+      <b>4.</b> Click "Find Shadiest Route".<br><br>
+      ShadowWalk compares route alternatives and picks the one with most shade based on real building data.
+    </div>
+    <div id="route-list"></div>
+    <div class="legend" id="legend" style="display:none">
+      <div class="legend-item"><div class="legend-dot" style="background:#4ecdc4;width:18px"></div> Shadiest</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#f5a623;width:18px"></div> Alternative</div>
+      <div class="legend-item"><div class="legend-dot" style="background:rgba(255,255,0,0.3);width:12px;height:12px;border-radius:2px"></div> Shadows</div>
+    </div>
+  </div>
+
+  <div id="status">Click "Set Start" to begin</div>
+
+  <div id="loading-overlay">
+    <div class="spinner"></div>
+    <p id="loading-text">Calculating shadows…</p>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
+<script src="https://unpkg.com/suncalc@1.9.0/suncalc.js"></script>
+<script>
+// ─── Map setup ─────────────────────────────────────────────────────────────
+const map = L.map('map', { zoomControl: true }).setView([37.7749, -122.4194], 15);
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '© OpenStreetMap © CARTO',
+  maxZoom: 20
+}).addTo(map);
+
+// Try to get user location
+map.locate({ setView: true, maxZoom: 16 });
+
+// ─── State ──────────────────────────────────────────────────────────────────
+let mode = null; // 'start' | 'end'
+let startMarker = null, endMarker = null;
+let startLatLng = null, endLatLng = null;
+let shadowLayer = null;
+let routeLayers = [];
+let routes = [];
+
+const timeInput = document.getElementById('time-input');
+const sunInfo   = document.getElementById('sun-info');
+const btnStart  = document.getElementById('btn-start');
+const btnEnd    = document.getElementById('btn-end');
+const btnRoute  = document.getElementById('btn-route');
+const statusEl  = document.getElementById('status');
+const routeList = document.getElementById('route-list');
+const loadingOverlay = document.getElementById('loading-overlay');
+const loadingText    = document.getElementById('loading-text');
+
+// Set default time to now
+const now = new Date();
+timeInput.value = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+function setStatus(msg) {
+  statusEl.textContent = msg;
+  statusEl.classList.remove('hidden');
+  clearTimeout(setStatus._t);
+  if (msg === '') setStatus._t = setTimeout(() => statusEl.classList.add('hidden'), 2000);
+}
+
+function showLoading(msg) {
+  loadingText.textContent = msg;
+  loadingOverlay.style.display = 'flex';
+}
+function hideLoading() { loadingOverlay.style.display = 'none'; }
+
+function getSunPos() {
+  const [h, m] = timeInput.value.split(':').map(Number);
+  const d = new Date(); d.setHours(h, m, 0, 0);
+  const center = startLatLng || map.getCenter();
+  const pos = SunCalc.getPosition(d, center.lat, center.lng);
+  return {
+    altitude: pos.altitude * 180 / Math.PI,   // degrees above horizon
+    azimuth:  (pos.azimuth  * 180 / Math.PI + 180) % 360  // 0=N,90=E,180=S,270=W
+  };
+}
+
+function updateSunInfo() {
+  const sun = getSunPos();
+  if (sun.altitude < 0) {
+    sunInfo.textContent = '🌙 Sun below horizon';
+    sunInfo.style.color = '#8888cc';
+  } else {
+    sunInfo.textContent = `☀️ ${sun.altitude.toFixed(1)}° alt · ${sun.azimuth.toFixed(0)}° az`;
+    sunInfo.style.color = '#f5a623';
+  }
+}
+updateSunInfo();
+timeInput.addEventListener('input', updateSunInfo);
+
+// ─── Markers ────────────────────────────────────────────────────────────────
+function makeIcon(color, label) {
+  return L.divIcon({
+    html: `<div style="width:28px;height:28px;background:${color};border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.5)"><span style="display:block;transform:rotate(45deg);text-align:center;line-height:22px;font-size:12px">${label}</span></div>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 28],
+    className: ''
+  });
+}
+
+// ─── Map click ──────────────────────────────────────────────────────────────
+map.on('click', e => {
+  if (mode === 'start') {
+    startLatLng = e.latlng;
+    if (startMarker) map.removeLayer(startMarker);
+    startMarker = L.marker(startLatLng, { icon: makeIcon('#2ecc71', 'S'), draggable: true }).addTo(map);
+    startMarker.on('dragend', ev => { startLatLng = ev.target.getLatLng(); checkReady(); });
+    mode = null;
+    btnStart.classList.remove('active');
+    map.getContainer().style.cursor = '';
+    setStatus('Start set. Now set your destination.');
+  } else if (mode === 'end') {
+    endLatLng = e.latlng;
+    if (endMarker) map.removeLayer(endMarker);
+    endMarker = L.marker(endLatLng, { icon: makeIcon('#e74c3c', 'E'), draggable: true }).addTo(map);
+    endMarker.on('dragend', ev => { endLatLng = ev.target.getLatLng(); checkReady(); });
+    mode = null;
+    btnEnd.classList.remove('active');
+    map.getContainer().style.cursor = '';
+    setStatus('Destination set. Ready to find route!');
+  }
+  checkReady();
+});
+
+function checkReady() {
+  btnRoute.disabled = !(startLatLng && endLatLng);
+}
+
+btnStart.addEventListener('click', () => {
+  mode = 'start';
+  btnStart.classList.add('active');
+  btnEnd.classList.remove('active');
+  map.getContainer().style.cursor = 'crosshair';
+  setStatus('Click on the map to set start point');
+});
+
+btnEnd.addEventListener('click', () => {
+  mode = 'end';
+  btnEnd.classList.add('active');
+  btnStart.classList.remove('active');
+  map.getContainer().style.cursor = 'crosshair';
+  setStatus('Click on the map to set destination');
+});
+
+// ─── Shadow polygon math ────────────────────────────────────────────────────
+const DEG2RAD = Math.PI / 180;
+const METERS_PER_DEG_LAT = 111320;
+
+function metersToLng(meters, lat) {
+  return meters / (METERS_PER_DEG_LAT * Math.cos(lat * DEG2RAD));
+}
+
+function buildingShadowPolygon(footprint, heightM, sunAltDeg, sunAzDeg) {
+  // footprint: array of [lng, lat]
+  // Returns a GeoJSON polygon or null if sun is below horizon
+  if (sunAltDeg <= 1) return null; // avoid near-zero altitude (infinite shadows)
+
+  const altRad = sunAltDeg * DEG2RAD;
+  const shadowLenM = heightM / Math.tan(altRad);
+
+  // Shadow falls OPPOSITE to sun direction
+  const shadowAzDeg = (sunAzDeg + 180) % 360;
+  const shadowAzRad = shadowAzDeg * DEG2RAD;
+
+  // dLat/dLng offset for the shadow vector
+  const avgLat = footprint.reduce((s, p) => s + p[1], 0) / footprint.length;
+  const dLat = shadowLenM * Math.cos(shadowAzRad) / METERS_PER_DEG_LAT;
+  const dLng = shadowLenM * Math.sin(shadowAzRad) / (METERS_PER_DEG_LAT * Math.cos(avgLat * DEG2RAD));
+
+  // Project footprint vertices
+  const projected = footprint.map(([lng, lat]) => [lng + dLng, lat + dLat]);
+
+  // Build shadow polygon: sweep the building footprint
+  // Use convex hull of (footprint + projected) for a fast approximation
+  const allPts = [...footprint, ...projected];
+  const fc = turf.featureCollection(allPts.map(p => turf.point(p)));
+  try {
+    const hull = turf.convex(fc);
+    return hull;
+  } catch(e) {
+    return null;
+  }
+}
+
+// ─── Overpass building fetch ─────────────────────────────────────────────────
+async function fetchBuildings(bounds) {
+  const { _southWest: sw, _northEast: ne } = bounds;
+  // Expand bounds a bit
+  const pad = 0.003;
+  const bbox = `${sw.lat - pad},${sw.lng - pad},${ne.lat + pad},${ne.lng + pad}`;
+
+  const query = `[out:json][timeout:25];
+(
+  way["building"](${bbox});
+  relation["building"](${bbox});
+);
+out body;>;out skel qt;`;
+
+  const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Overpass fetch failed');
+  return res.json();
+}
+
+function overpassToFootprints(data) {
+  const nodes = {};
+  data.elements.forEach(el => {
+    if (el.type === 'node') nodes[el.id] = [el.lon, el.lat];
+  });
+
+  const footprints = [];
+  data.elements.forEach(el => {
+    if (el.type === 'way' && el.nodes && el.tags) {
+      const coords = el.nodes.map(id => nodes[id]).filter(Boolean);
+      if (coords.length < 4) return;
+
+      // Get height: prefer height tag, then levels*3.5, else default 10m
+      let height = 10;
+      if (el.tags.height) {
+        const h = parseFloat(el.tags.height);
+        if (!isNaN(h)) height = h;
+      } else if (el.tags['building:levels']) {
+        height = parseFloat(el.tags['building:levels']) * 3.5 || 10;
+      }
+
+      footprints.push({ coords, height });
+    }
+  });
+  return footprints;
+}
+
+// ─── OSRM routing ───────────────────────────────────────────────────────────
+async function fetchRoutes(start, end) {
+  const url = `https://router.project-osrm.org/route/v1/foot/${start.lng},${start.lat};${end.lng},${end.lat}?geometries=geojson&alternatives=true&steps=false&overview=full`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('OSRM fetch failed');
+  const data = await res.json();
+  if (!data.routes || data.routes.length === 0) throw new Error('No route found');
+  return data.routes;
+}
+
+// ─── Sample points along route ──────────────────────────────────────────────
+function sampleRoute(geojsonLine, intervalM = 5) {
+  const line = turf.lineString(geojsonLine.coordinates);
+  const lengthKm = turf.length(line, { units: 'kilometers' });
+  const n = Math.max(10, Math.ceil((lengthKm * 1000) / intervalM));
+  const points = [];
+  for (let i = 0; i <= n; i++) {
+    const pt = turf.along(line, (i / n) * lengthKm, { units: 'kilometers' });
+    points.push(pt.geometry.coordinates); // [lng, lat]
+  }
+  return points;
+}
+
+// ─── Check how many points are in shadow ────────────────────────────────────
+function scoreRoute(routePoints, shadowPolygons) {
+  if (shadowPolygons.length === 0) return 0;
+  let inShadow = 0;
+  for (const [lng, lat] of routePoints) {
+    const pt = turf.point([lng, lat]);
+    for (const poly of shadowPolygons) {
+      if (turf.booleanPointInPolygon(pt, poly)) { inShadow++; break; }
+    }
+  }
+  return inShadow / routePoints.length;
+}
+
+// ─── Main route-finding ──────────────────────────────────────────────────────
+const ROUTE_COLORS = ['#4ecdc4', '#f5a623', '#e74c3c', '#9b59b6'];
+
+btnRoute.addEventListener('click', async () => {
+  if (!startLatLng || !endLatLng) return;
+
+  // Clear previous results
+  routeLayers.forEach(l => map.removeLayer(l));
+  routeLayers = [];
+  if (shadowLayer) { map.removeLayer(shadowLayer); shadowLayer = null; }
+  routeList.innerHTML = '';
+  document.getElementById('legend').style.display = 'none';
+
+  const sun = getSunPos();
+
+  try {
+    showLoading('Fetching routes…');
+    const osrmRoutes = await fetchRoutes(startLatLng, endLatLng);
+
+    showLoading('Fetching building data…');
+    // Compute bounding box over all routes
+    const allCoords = osrmRoutes.flatMap(r => r.geometry.coordinates);
+    const lats = allCoords.map(c => c[1]), lngs = allCoords.map(c => c[0]);
+    const bounds = L.latLngBounds(
+      [Math.min(...lats), Math.min(...lngs)],
+      [Math.max(...lats), Math.max(...lngs)]
+    );
+
+    let shadowPolygons = [];
+
+    if (sun.altitude > 1) {
+      const buildingData = await fetchBuildings(bounds);
+      const footprints = overpassToFootprints(buildingData);
+
+      showLoading(`Casting shadows for ${footprints.length} buildings…`);
+      const shadowFeatures = [];
+
+      for (const { coords, height } of footprints) {
+        const shadow = buildingShadowPolygon(coords, height, sun.altitude, sun.azimuth);
+        if (shadow) {
+          shadowPolygons.push(shadow);
+          shadowFeatures.push(shadow);
+        }
+      }
+
+      // Draw shadow layer
+      if (shadowFeatures.length > 0) {
+        shadowLayer = L.geoJSON({ type: 'FeatureCollection', features: shadowFeatures }, {
+          style: { color: 'rgba(0,0,0,0)', fillColor: '#ffff00', fillOpacity: 0.15, weight: 0 }
+        }).addTo(map);
+      }
+    }
+
+    showLoading('Scoring routes by shade…');
+
+    // Score each route
+    const scored = osrmRoutes.map((r, i) => {
+      const pts = sampleRoute(r.geometry);
+      const shade = scoreRoute(pts, shadowPolygons);
+      const distKm = (r.distance / 1000).toFixed(2);
+      const mins = Math.round(r.duration / 60);
+      return { route: r, shade, distKm, mins, idx: i };
+    });
+
+    scored.sort((a, b) => b.shade - a.shade);
+
+    // Draw routes (shadiest on top)
+    scored.forEach((s, rank) => {
+      const color = rank === 0 ? '#4ecdc4' : ROUTE_COLORS[rank] || '#f5a623';
+      const weight = rank === 0 ? 5 : 3;
+      const opacity = rank === 0 ? 1 : 0.55;
+      const layer = L.geoJSON(s.route.geometry, {
+        style: { color, weight, opacity, lineJoin: 'round' }
+      }).addTo(map);
+      routeLayers.push(layer);
+
+      // Card
+      const card = document.createElement('div');
+      card.className = 'route-card' + (rank === 0 ? ' best' : '');
+      card.innerHTML = `
+        <div class="route-label" style="color:${color}">Route ${rank + 1}</div>
+        <div class="shade-bar-bg"><div class="shade-bar-fill" style="width:${(s.shade*100).toFixed(0)}%"></div></div>
+        <div class="route-meta">
+          <span>🌿 ${(s.shade*100).toFixed(0)}% in shade</span>
+          <span>${s.distKm} km · ${s.mins} min</span>
+        </div>`;
+      card.addEventListener('click', () => {
+        map.fitBounds(layer.getBounds(), { padding: [40, 40] });
+      });
+      routeList.appendChild(card);
+    });
+
+    document.getElementById('legend').style.display = 'flex';
+
+    // Fit map
+    const bestCoords = scored[0].route.geometry.coordinates;
+    const allPts = bestCoords.map(c => [c[1], c[0]]);
+    map.fitBounds(L.latLngBounds(allPts), { padding: [60, 60] });
+
+    const pct = (scored[0].shade * 100).toFixed(0);
+    setStatus(sun.altitude <= 1
+      ? `🌙 Sun below horizon — routes shown by distance`
+      : `✅ Found ${scored.length} routes · Best route: ${pct}% in shade`);
+
+  } catch (err) {
+    setStatus(`Error: ${err.message}`);
+    console.error(err);
+  } finally {
+    hideLoading();
+  }
+});
+</script>
+</body>
+</html>
