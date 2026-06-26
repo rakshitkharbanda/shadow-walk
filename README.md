@@ -1,8 +1,8 @@
 # ShadowWalk ☀️
 
-A walking route planner that picks the shadiest path based on real building shadow projections at any time of day.
+**[▶ Try it live →](https://rakshitkharbanda.github.io/shadow-walk/)**
 
-![ShadowWalk screenshot](screenshot.png)
+A walking route planner that picks the shadiest path based on real building shadow projections at any time of day.
 
 ## How it works
 
